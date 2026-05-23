@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes, maximum-scale=2.0">
   <title>PTOE · 视觉小说素材统计</title>
+  <!-- 引入 html2canvas 库用于截图 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js">
+  </script>
   <style>
     * {
       margin: 0;
@@ -260,6 +263,39 @@
       transform: translateY(1px);
     }
 
+    /* 导出图片按钮样式 - 与保存按钮区分 */
+    .export-btn {
+      background: #c7b294;
+      border: none;
+      padding: 0.8rem 2.2rem;
+      border-radius: 3rem;
+      font-weight: 600;
+      font-size: 1rem;
+      letter-spacing: 0.8px;
+      color: #2f2a22;
+      background: #dbccae;
+      box-shadow: 0 5px 12px rgba(140, 110, 60, 0.18);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      transition: 0.2s;
+      border: 1px solid #bca67e;
+      backdrop-filter: blur(4px);
+    }
+
+    .export-btn:hover {
+      background: #cfbc96;
+      border-color: #a68d62;
+      color: #1e1810;
+      box-shadow: 0 8px 18px rgba(130, 100, 50, 0.22);
+    }
+
+    .export-btn:active {
+      background: #bfa87c;
+      transform: translateY(1px);
+    }
+
     .status-msg {
       font-size: 0.9rem;
       color: #6b5d4b;
@@ -279,6 +315,17 @@
       font-size: 0.8rem;
       color: #b8a68b;
       margin-top: 0.5rem;
+    }
+
+    /* 导出时的快照容器 - 隐藏但用于渲染 */
+    #exportSnapshot {
+      position: absolute;
+      left: -9999px;
+      top: 0;
+      width: 800px;
+      background: #fffcf4;
+      padding: 2rem;
+      border-radius: 1rem;
     }
 
     @media (max-width: 500px) {
@@ -309,11 +356,15 @@
 
   <div class="save-panel">
     <span class="status-msg" id="saveStatus">💾 随时保存</span>
+    <button class="export-btn" id="exportImageBtn">🖼️ 导出为图片</button>
     <button class="save-btn" id="saveButton">📋 保存当前记录</button>
   </div>
   <hr>
-  <div class="footer-note">点击 +/- 调整数量 · 备注自动扩展</div>
+  <div class="footer-note">点击 +/- 调整数量 · 备注自动扩展 · 可导出JPG</div>
 </div>
+
+<!-- 隐藏的导出快照容器，用于生成纯净的表格图片 -->
+<div id="exportSnapshot"></div>
 
 <script>
   (function() {
@@ -344,14 +395,12 @@
         const stored = localStorage.getItem('ptoe_material_data');
         if (stored) {
           const parsed = JSON.parse(stored);
-          // 简单合并，确保结构完整
           if (parsed && typeof parsed === 'object') {
             CATEGORIES.forEach(cat => {
               if (parsed[cat.id] && typeof parsed[cat.id].count === 'number') {
                 projectData[cat.id].count = parsed[cat.id].count;
               }
               if (parsed[cat.id] && Array.isArray(parsed[cat.id].remarks)) {
-                // 深拷贝备注数组，但确保每个备注对象包含所需字段
                 projectData[cat.id].remarks = parsed[cat.id].remarks.map(r => ({
                   chapter: r?.chapter || '',
                   summary: r?.summary || '',
@@ -359,8 +408,6 @@
                 }));
               }
             });
-            // 同步数量与备注长度（防止不一致：若备注数量 > count，以备注为准补全？但以count为权威，裁剪或保留）
-            // 设计：以count为权威，但保留已有备注。如果count小于备注数，删减多余备注；如果count大于备注数，补充空备注。
             syncRemarksWithCounts();
           }
         }
@@ -388,7 +435,6 @@
     // 保存到 localStorage
     function saveToStorage() {
       try {
-        // 确保数据整洁
         syncRemarksWithCounts();
         localStorage.setItem('ptoe_material_data', JSON.stringify(projectData));
         return true;
@@ -403,7 +449,6 @@
       const cat = CATEGORIES.find(c => c.id === catId);
       if (!cat) return;
       const data = projectData[catId];
-      // 确保数据一致性
       if (data.remarks.length !== data.count) {
         syncRemarksWithCounts();
       }
@@ -411,47 +456,38 @@
       const card = document.getElementById(`card-${catId}`);
       if (!card) return;
 
-      // 更新数字显示
       const numberSpan = card.querySelector('.number-display');
       if (numberSpan) numberSpan.textContent = data.count;
 
-      // 更新表格体
       const tbody = card.querySelector('.remark-tbody');
       if (!tbody) return;
       
-      // 清空并重新构建备注行
       tbody.innerHTML = '';
       
       if (data.count === 0) {
-        // 显示一行占位提示
         const emptyRow = document.createElement('tr');
         emptyRow.innerHTML = `<td colspan="3" style="text-align: center; color: #b9aa92; padding: 1.2rem; font-style: italic;">暂无素材，点击 + 添加备注</td>`;
         tbody.appendChild(emptyRow);
         return;
       }
 
-      // 根据remarks数组生成行
       data.remarks.forEach((remark, index) => {
         const row = document.createElement('tr');
         
         REMARK_COLUMNS.forEach(col => {
           const td = document.createElement('td');
           if (col.key === 'summary' || col.key === 'diff') {
-            // 使用textarea实现自动换行和高度适应
             const textarea = document.createElement('textarea');
             textarea.setAttribute('rows', '1');
             textarea.value = remark[col.key] || '';
             textarea.placeholder = col.placeholder || '';
-            // 自动调整高度
             autoResizeTextarea(textarea);
             textarea.addEventListener('input', function(e) {
               autoResizeTextarea(this);
-              // 更新对应数据
               updateRemarkField(catId, index, col.key, this.value);
             });
             td.appendChild(textarea);
           } else {
-            // 章节定位使用input（单行）
             const input = document.createElement('input');
             input.type = 'text';
             input.value = remark[col.key] || '';
@@ -478,12 +514,10 @@
     // 更新某个备注字段
     function updateRemarkField(catId, index, field, value) {
       if (!projectData[catId] || !projectData[catId].remarks[index]) {
-        // 容错：若索引异常，尝试同步
         syncRemarksWithCounts();
         if (!projectData[catId]?.remarks[index]) return;
       }
       projectData[catId].remarks[index][field] = value;
-      // 注意：不自动保存到storage，等用户点击保存按钮。
     }
 
     // 改变计数
@@ -492,29 +526,21 @@
       if (!data) return;
       
       const newCount = data.count + delta;
-      if (newCount < 0) return; // 不允许负数
+      if (newCount < 0) return;
       
       data.count = newCount;
       
-      // 调整备注数组
       if (delta > 0) {
-        // 增加：在末尾添加空备注
         for (let i = 0; i < delta; i++) {
           data.remarks.push({ chapter: '', summary: '', diff: '' });
         }
       } else if (delta < 0) {
-        // 减少：从末尾移除
         const removeCount = Math.abs(delta);
         data.remarks = data.remarks.slice(0, Math.max(0, data.remarks.length - removeCount));
       }
       
-      // 再次确保长度匹配
       syncRemarksWithCounts();
-      
-      // 重新渲染该分类
       renderCategory(catId);
-      
-      // 更新保存状态提示（提示未保存）
       document.getElementById('saveStatus').textContent = '✏️ 未保存更改';
     }
 
@@ -531,7 +557,6 @@
         card.className = 'counter-card';
         card.id = `card-${cat.id}`;
         
-        // 构建HTML结构
         card.innerHTML = `
           <div class="counter-header">
             <div class="counter-title">
@@ -559,7 +584,6 @@
         
         grid.appendChild(card);
         
-        // 绑定事件
         const decreaseBtn = card.querySelector('.decrease-btn');
         const increaseBtn = card.querySelector('.increase-btn');
         
@@ -573,21 +597,148 @@
           changeCount(cat.id, 1);
         });
         
-        // 立即渲染备注表格部分
         renderCategory(cat.id);
       });
     }
 
-    // 为所有现有的textarea绑定自动高度（在动态创建后通过renderCategory调用）
-    // 额外监听window加载完成确保自适应
-    window.addEventListener('load', () => {
-      // 初次加载时从storage读取
-      loadFromStorage();
-      syncRemarksWithCounts();
-      renderAll();
+    // ========== 导出为图片功能 ==========
+    function buildExportHTML() {
+      // 构建一个干净的、用于截图的HTML内容
+      let html = `
+        <div style="background:#fffcf4; padding:2rem; font-family:'Segoe UI','Noto Sans',sans-serif; color:#3e3a37;">
+          <h2 style="color:#5b4b3a; border-bottom:2px dashed #dacbb8; padding-bottom:0.5rem; margin-bottom:1.5rem;">
+            📖 PTOE 素材需求统计
+          </h2>
+      `;
+
+      CATEGORIES.forEach(cat => {
+        const data = projectData[cat.id];
+        html += `
+          <div style="margin-bottom:2rem; background:#fefaf2; border-radius:1.5rem; padding:1.2rem; border:1px solid #e7daca;">
+            <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:1rem;">
+              <span style="font-size:1.8rem;">${cat.icon}</span>
+              <span style="font-weight:600; font-size:1.4rem; color:#4f3f2e;">${cat.label}</span>
+              <span style="margin-left:auto; font-size:1.8rem; font-weight:550; color:#3b3224; background:#fffbf5; padding:0.2rem 1rem; border-radius:2rem;">
+                共 ${data.count} 个
+              </span>
+            </div>
+        `;
+
+        if (data.count === 0) {
+          html += `<p style="text-align:center; color:#b9aa92; padding:1rem; font-style:italic;">暂无素材</p>`;
+        } else {
+          html += `
+            <table style="width:100%; border-collapse:collapse; font-size:0.9rem; background:#fffef9; border:1px solid #e2d4c0; border-radius:0.8rem; overflow:hidden;">
+              <thead>
+                <tr style="background:#f3ede2;">
+                  ${REMARK_COLUMNS.map(col => `<th style="padding:0.6rem; text-align:left; color:#4b3c2c; border-bottom:2px solid #dacbb8;">${col.label}</th>`).join('')}
+                </tr>
+              </thead>
+              <tbody>
+          `;
+
+          data.remarks.forEach(remark => {
+            html += `
+              <tr>
+                <td style="padding:0.5rem; border-bottom:1px solid #ede3d2; vertical-align:top;">${escapeHTML(remark.chapter) || '—'}</td>
+                <td style="padding:0.5rem; border-bottom:1px solid #ede3d2; vertical-align:top; white-space:pre-wrap;">${escapeHTML(remark.summary) || '—'}</td>
+                <td style="padding:0.5rem; border-bottom:1px solid #ede3d2; vertical-align:top; white-space:pre-wrap;">${escapeHTML(remark.diff) || '—'}</td>
+              </tr>
+            `;
+          });
+
+          html += `
+              </tbody>
+            </table>
+          `;
+        }
+
+        html += `</div>`;
+      });
+
+      // 添加时间戳
+      const now = new Date();
+      const timeStr = now.toLocaleString('zh-CN', { 
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit'
+      });
+      html += `<p style="text-align:right; color:#b8a68b; font-size:0.8rem; margin-top:1rem;">导出时间：${timeStr}</p>`;
+      html += `</div>`;
+
+      return html;
+    }
+
+    function escapeHTML(str) {
+      if (!str) return '';
+      return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    async function exportToImage() {
+      const snapshotDiv = document.getElementById('exportSnapshot');
+      const exportBtn = document.getElementById('exportImageBtn');
+      const statusEl = document.getElementById('saveStatus');
       
-      // 对所有已存在的textarea做一次自适应 (renderCategory已经处理)
-    });
+      if (!snapshotDiv) return;
+
+      // 显示导出中状态
+      if (exportBtn) {
+        exportBtn.textContent = '⏳ 生成中...';
+        exportBtn.disabled = true;
+      }
+      statusEl.textContent = '🖼️ 正在生成图片...';
+
+      try {
+        // 构建导出内容
+        snapshotDiv.innerHTML = buildExportHTML();
+        
+        // 使用 html2canvas 渲染
+        const canvas = await html2canvas(snapshotDiv, {
+          backgroundColor: '#fffcf4',
+          scale: 2, // 2倍清晰度
+          useCORS: true,
+          logging: false,
+        });
+
+        // 转换为 JPG 并下载
+        const imgData = canvas.toDataURL('image/jpeg', 0.92);
+        const link = document.createElement('a');
+        const now = new Date();
+        const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+        const timeStr = now.toTimeString().slice(0, 8).replace(/:/g, '');
+        link.download = `PTOE_素材统计_${dateStr}_${timeStr}.jpg`;
+        link.href = imgData;
+        link.click();
+
+        statusEl.textContent = '✅ 图片已导出';
+        setTimeout(() => {
+          if (statusEl.textContent === '✅ 图片已导出') {
+            statusEl.textContent = '💾 已保存';
+          }
+        }, 2500);
+      } catch (error) {
+        console.error('导出图片失败:', error);
+        statusEl.textContent = '❌ 导出失败，请重试';
+      } finally {
+        // 恢复按钮状态
+        if (exportBtn) {
+          exportBtn.textContent = '🖼️ 导出为图片';
+          exportBtn.disabled = false;
+        }
+        // 清空快照容器
+        snapshotDiv.innerHTML = '';
+      }
+    }
+
+    // 绑定导出按钮事件
+    const exportBtn = document.getElementById('exportImageBtn');
+    if (exportBtn) {
+      exportBtn.addEventListener('click', exportToImage);
+    }
 
     // 保存按钮逻辑
     const saveBtn = document.getElementById('saveButton');
@@ -595,7 +746,6 @@
     
     if (saveBtn) {
       saveBtn.addEventListener('click', () => {
-        // 保存前同步一下（确保数量与备注一致）
         syncRemarksWithCounts();
         const success = saveToStorage();
         if (success) {
@@ -611,25 +761,19 @@
       });
     }
 
-    // 页面关闭或刷新前自动尝试保存？不强制，但可以提醒（可选）。这里不加自动保存以免覆盖用户意图。
-    // 但提供一个额外：当修改备注时状态提示变化，已在changeCount和updateRemarkField间接体现。
-    // 为输入框修改添加状态提示
+    // 监听输入变化，更新保存状态
     document.addEventListener('input', function(e) {
       if (e.target.closest('.remark-table')) {
-        // 任何备注输入改变时，显示未保存
         if (statusEl) {
           statusEl.textContent = '✏️ 未保存更改';
         }
       }
     });
 
-    // 初始化：加载数据并渲染
+    // 初始化
     loadFromStorage();
     syncRemarksWithCounts();
     renderAll();
-
-    // 额外处理：如果某些textarea在后续渲染中，autoResize已经调用。
-    // 针对动态增加的备注行，在renderCategory里已调用autoResizeTextarea。
   })();
 </script>
 </body>
