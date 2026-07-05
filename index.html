@@ -774,6 +774,79 @@
     loadFromStorage();
     syncRemarksWithCounts();
     renderAll();
+    // ========== 自动保存功能 ==========
+const AUTO_SAVE_INTERVAL = 5 * 60 * 1000; // 5分钟 = 300000毫秒
+let autoSaveTimer = null;
+let lastAutoSaveTime = null;
+
+// 启动自动保存定时器
+function startAutoSave() {
+    // 先清除已有的定时器，避免重复
+    if (autoSaveTimer) {
+        clearInterval(autoSaveTimer);
+    }
+    
+    autoSaveTimer = setInterval(() => {
+        // 只在有未保存更改时才自动保存
+        const statusEl = document.getElementById('saveStatus');
+        if (statusEl && statusEl.textContent.includes('未保存')) {
+            performAutoSave();
+        }
+    }, AUTO_SAVE_INTERVAL);
+    
+    console.log('✅ 自动保存已启动（每5分钟检查一次）');
+}
+
+// 执行自动保存
+function performAutoSave() {
+    syncRemarksWithCounts();
+    const success = saveToStorage();
+    const statusEl = document.getElementById('saveStatus');
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    
+    if (success) {
+        lastAutoSaveTime = now;
+        if (statusEl) {
+            statusEl.textContent = `⏰ ${timeStr} 已自动保存`;
+            // 3秒后恢复普通状态提示
+            setTimeout(() => {
+                if (statusEl.textContent.includes('已自动保存')) {
+                    statusEl.textContent = '💾 已保存';
+                }
+            }, 3000);
+        }
+        console.log(`🕐 自动保存完成 (${timeStr})`);
+    } else {
+        console.error('自动保存失败');
+        if (statusEl) {
+            statusEl.textContent = '⚠️ 自动保存失败';
+        }
+    }
+}
+
+// 手动保存时重置自动保存计时器（可选）
+function resetAutoSaveTimer() {
+    if (autoSaveTimer) {
+        clearInterval(autoSaveTimer);
+        startAutoSave(); // 重新开始计时
+    }
+}
+
+// 在页面初始化时启动自动保存
+startAutoSave();
+
+// 修改手动保存按钮，使其重置自动保存计时器
+const saveBtn = document.getElementById('saveButton');
+if (saveBtn) {
+    const originalClickHandler = saveBtn.onclick;
+    saveBtn.addEventListener('click', function() {
+        // 延迟执行，确保手动保存先完成
+        setTimeout(() => {
+            resetAutoSaveTimer();
+        }, 100);
+    });
+}
   })();
 </script>
 </body>
